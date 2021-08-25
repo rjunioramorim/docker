@@ -1,0 +1,104 @@
+version: "3"
+
+services:
+  app:
+    build: .
+    container_name: app
+    restart: always
+    entrypoint: dockerize -wait tcp://postgres:5432 -timeout 40s ./entrypoint.sh
+    environment:
+      DB_HOST: postgres
+      DB_DATABASE: stores
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+
+    volumes:
+      - ./:/var/www
+    networks:
+      - app-network
+    depends_on:
+      - "postgres"
+      - "redis"
+
+  nginx:
+    build: ./.docker/nginx
+    container_name: nginx
+    restart: always
+    tty: true
+    ports:
+      - "8000:80"
+    volumes:
+      - ./:/var/www
+    networks:
+      - app-network
+    depends_on:
+      - "app"
+
+  redis:
+    image: redis:alpine
+    container_name: redis
+    restart: always
+    expose:
+      - 6379
+    networks:
+      - app-network
+
+  postgres:
+    build: ./.docker/postgres
+    restart: always
+    container_name: postgres
+    volumes:
+      - ./.docker/db:/var/lib/postgresql/data
+    environment:
+      ports:
+        - '${FORWARD_DB_PORT:-5432}:5432'
+    environment:
+        PGPASSWORD: './docker/${DB_PASSWORD:-secret}'
+        POSTGRES_DB: './docker/${DB_DATABASE}'
+        POSTGRES_USER: './docker/${DB_USERNAME}'
+        POSTGRES_PASSWORD: './docker/${DB_PASSWORD:-secret}'
+    volumes:
+        - './docker/db:/var/lib/postgresql/data'
+    healthcheck:
+      test: ["CMD", "pg_isready", "-q", "-d", "./docker/${DB_DATABASE}", "-U", "./docker/${DB_USERNAME}"]
+      retries: 3
+      timeout: 5s    
+    networks:
+      - app-network
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: "docker@docker.com"
+      PGADMIN_DEFAULT_PASSWORD: "docker"
+    ports:
+      - "8081:80"
+    depends_on:
+      - postgres
+    networks:
+      - app-network
+
+  meilisearch:
+    image: 'getmeili/meilisearch:latest'
+    ports:
+        - '${FORWARD_MEILISEARCH_PORT:-7700}:7700'
+    volumes:
+        - 'sailmeilisearch:/data.ms'
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--spider",  "http://localhost:7700/health"]
+      retries: 3
+      timeout: 5s
+  mailhog:
+    image: 'mailhog/mailhog:latest'
+    ports:
+      - './docker/${FORWARD_MAILHOG_PORT:-1025}:1025'
+      - './docker/${FORWARD_MAILHOG_DASHBOARD_PORT:-8025}:8025'
+    networks:
+      - app-network 
+networks:
+    app-network:
+        driver: bridge
