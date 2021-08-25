@@ -2,15 +2,19 @@ version: "3"
 
 services:
   app:
-    build: .
-    container_name: app
+    build: ../docker
+    container_name: app_${APP_NAME}
     restart: always
-    entrypoint: dockerize -wait tcp://postgres:5432 -timeout 40s ./entrypoint.sh
+    extra_hosts:
+        - 'host.docker.internal:host-gateway'
+    ports:
+        - '${APP_PORT:-80}:80'
+    # entrypoint: dockerize -wait tcp://postgres:5432 -timeout 40s ./../docker/entrypoint.sh
     environment:
-      DB_HOST: postgres
-      DB_DATABASE: stores
+      DB_HOST: ${DB_HOST}
+      DB_DATABASE: ${APP_NAME}
       DB_USERNAME: postgres
-      DB_PASSWORD: postgres
+      DB_PASSWORD: docker
 
     volumes:
       - ./:/var/www
@@ -21,8 +25,8 @@ services:
       - "redis"
 
   nginx:
-    build: ./.docker/nginx
-    container_name: nginx
+    build: ../docker/nginx
+    container_name: nginx_${APP_NAME}
     restart: always
     tty: true
     ports:
@@ -35,40 +39,43 @@ services:
       - "app"
 
   redis:
-    image: redis:alpine
-    container_name: redis
-    restart: always
-    expose:
-      - 6379
+    image: 'redis:alpine'
+    container_name: redis_${APP_NAME}
+    ports:
+        - '${FORWARD_REDIS_PORT:-6379}:6379'
+    volumes:
+        - 'app_redis:/data'
     networks:
-      - app-network
+        - app-network
+
+    healthcheck:
+        test: ["CMD", "redis-cli", "ping"]
+        retries: 3
+        timeout: 5s
 
   postgres:
-    build: ./.docker/postgres
+    build: ../docker/postgres
     restart: always
-    container_name: postgres
+    container_name: postgres_${APP_NAME}
     volumes:
-      - ./.docker/db:/var/lib/postgresql/data
+      - ../docker/db/{$APP_NAME}:/var/lib/postgresql/data
+    ports:
+      - '${FORWARD_DB_PORT:-5432}:5432'
     environment:
-      ports:
-        - '${FORWARD_DB_PORT:-5432}:5432'
-    environment:
-        PGPASSWORD: './docker/${DB_PASSWORD:-secret}'
-        POSTGRES_DB: './docker/${DB_DATABASE}'
-        POSTGRES_USER: './docker/${DB_USERNAME}'
-        POSTGRES_PASSWORD: './docker/${DB_PASSWORD:-secret}'
-    volumes:
-        - './docker/db:/var/lib/postgresql/data'
+      PGPASSWORD: '${DB_PASSWORD:-secret}'
+      POSTGRES_DB: '${DB_DATABASE}'
+      POSTGRES_USER: '${DB_USERNAME}'
+      POSTGRES_PASSWORD: '${DB_PASSWORD:-secret}'
     healthcheck:
-      test: ["CMD", "pg_isready", "-q", "-d", "./docker/${DB_DATABASE}", "-U", "./docker/${DB_USERNAME}"]
+      test: ["CMD", "pg_isready", "-q", "-d", "../docker/${DB_DATABASE}", "-U", "../docker/${DB_USERNAME}"]
       retries: 3
-      timeout: 5s    
+      timeout: 5s
     networks:
       - app-network
 
   pgadmin:
     image: dpage/pgadmin4
-    container_name: pgadmin
+    container_name: pgadmin_${APP_NAME}
     restart: always
     environment:
       PGADMIN_DEFAULT_EMAIL: "docker@docker.com"
@@ -82,23 +89,35 @@ services:
 
   meilisearch:
     image: 'getmeili/meilisearch:latest'
+    container_name: meilisearch_${APP_NAME}
     ports:
         - '${FORWARD_MEILISEARCH_PORT:-7700}:7700'
     volumes:
-        - 'sailmeilisearch:/data.ms'
+        - 'app_meilisearch:/data.ms'
     networks:
       - app-network
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--spider",  "http://localhost:7700/health"]
       retries: 3
       timeout: 5s
+
   mailhog:
     image: 'mailhog/mailhog:latest'
+    container_name: mailhog_${APP_NAME}
     ports:
-      - './docker/${FORWARD_MAILHOG_PORT:-1025}:1025'
-      - './docker/${FORWARD_MAILHOG_DASHBOARD_PORT:-8025}:8025'
+      - '${FORWARD_MAILHOG_PORT:-1025}:1025'
+      - '${FORWARD_MAILHOG_DASHBOARD_PORT:-8025}:8025'
     networks:
-      - app-network 
+      - app-network
+
 networks:
     app-network:
         driver: bridge
+
+volumes:
+    app_pgsql:
+        driver: local
+    app_redis:
+        driver: local
+    app_meilisearch:
+        driver: local
