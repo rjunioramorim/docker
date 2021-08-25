@@ -58,7 +58,7 @@ services:
     restart: always
     container_name: postgres_${APP_NAME}
     volumes:
-      - ../docker/db/{$APP_NAME}:/var/lib/postgresql/data
+      - ../docker/db/$APP_NAME:/var/lib/postgresql/data
     ports:
       - '${FORWARD_DB_PORT:-5432}:5432'
     environment:
